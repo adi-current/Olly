@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <U8g2lib.h>
+#include "olly_face_96x64.h"
 
 class DisplayModule {
   public:

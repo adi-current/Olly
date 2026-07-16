@@ -10,6 +10,7 @@ void DisplayModule::begin() {
 
 void DisplayModule::update() {
   display.clearBuffer();
-  display.drawStr(0, 20, "Olly is awake");
+  // Face canvas is 96x64, centered on the 128x64 panel -> 16px margin each side
+  display.drawXBMP(16, 0, OLLY_FACE_WIDTH, OLLY_FACE_HEIGHT, olly_face_neutral);
   display.sendBuffer();
 }
