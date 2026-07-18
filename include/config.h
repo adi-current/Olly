@@ -4,4 +4,14 @@
 #define DISPLAY_SDA_PIN 8
 #define DISPLAY_SCL_PIN 9
 
+// KY-040 rotary encoder
+// Uses GPIO0/1/3 (within the 0-4 range) - GPIO2 is deliberately skipped,
+// it's an ESP32-C3 strapping pin (boot mode selection) and risky to use
+// for a button that could be held down at power-on.
+// Also avoids GPIO8/9 (already used for I2C, and also strapping pins)
+// and GPIO18/19 (reserved by native USB-CDC, see platformio.ini build_flags)
+#define ENCODER_CLK_PIN 3
+#define ENCODER_DT_PIN  1
+#define ENCODER_SW_PIN  0
+
 #endif
