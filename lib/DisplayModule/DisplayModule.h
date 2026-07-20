@@ -7,6 +7,7 @@
 #include "status_icons.h"
 #include "face_static_parts.h"
 #include "FaceModule.h"
+#include "MenuModule.h"
 // NOTE: olly_face_96x64.h is intentionally no longer included here.
 // The face is now drawn procedurally by FaceModule (border + eyes).
 // The old file is kept in this folder untouched, purely as a visual
@@ -15,7 +16,27 @@
 class DisplayModule {
   public:
     void begin();
-    void update();
+
+    // Call every loop() with the real input signals for this frame:
+    //   rotationDelta -> encoder clicks since last call (+/-)
+    //   confirmPressed -> encoder click (forward/commit, everywhere)
+    //   backPressed    -> touch long-press (back one level, everywhere)
+    // Draws Home (face + strip) when the menu isn't open, or the menu
+    // itself when it is - the two are mutually exclusive on screen.
+    // Returns true exactly once, the frame a feature gets selected at the
+    // deepest menu level - read selectedGroup()/selectedItem() that frame.
+    bool update(int rotationDelta, bool confirmPressed, bool backPressed);
+
+    // Valid only on the frame update() returned true.
+    int selectedGroup() const;
+    int selectedItem() const;
+
+    // Lets other full-screen features (games, fun, future timers) draw
+    // directly on the same physical display when they're active. DisplayModule
+    // deliberately doesn't know these features exist - main.cpp is the one
+    // that decides whether Home/Menu or some other feature owns the screen
+    // this frame, same way it already owns which input goes where.
+    U8G2* getRawDisplay() { return &display; }
 
     // Phase 3 status inputs - call these whenever the values change
     void setWifiConnected(bool connected);
@@ -39,6 +60,7 @@ class DisplayModule {
     U8G2_SH1106_128X64_NONAME_F_HW_I2C display{U8G2_R0, U8X8_PIN_NONE};
 
     FaceModule face;
+    MenuModule menu;
 };
 
 #endif

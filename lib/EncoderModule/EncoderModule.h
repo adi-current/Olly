@@ -4,13 +4,20 @@
 // Driver for a KY-040 rotary encoder module: quadrature rotation (CLK/DT)
 // plus its built-in push button (SW).
 //
-// Rotation uses a state-table quadrature decoder (not naive "read CLK, check
-// if DT differs") because cheap encoders like the KY-040 bounce badly on
-// their contacts - a naive read routinely registers 2-3 steps for one
-// physical click, or even occasional steps in the wrong direction. The
-// state table only counts a full, valid quadrature cycle as one step, which
-// filters that out almost entirely without needing any capacitors/RC
-// filtering on the board itself.
+// Rotation decoding uses a full-step state-graph algorithm (the same
+// approach used by most mature Arduino rotary encoder libraries), NOT a
+// "count raw pulses and divide by 4" approach. That distinction matters in
+// practice: a raw pulse-counting approach assumes every physical detent
+// produces a clean multiple of 4 transitions, which is often false on
+// cheap encoders like the KY-040 - a slightly short or bouncy turn can
+// leave a fractional remainder that either delays a later, unrelated turn
+// or gets discarded outright, causing clicks to feel skipped or laggy.
+//
+// The state-graph approach instead tracks the encoder's exact position in
+// a known sequence of valid states. A click is only ever emitted once a
+// complete, valid detent-to-detent path has actually occurred; any bounce
+// or noise along the way just falls back to the start state harmlessly,
+// with nothing partial left over to confuse a later turn.
 //
 // The button gets simple polled debounce (in update()) plus short/long
 // press classification, matching the interaction rules already established
@@ -19,12 +26,14 @@ class EncoderModule {
   public:
     void begin();
 
-    // Call every loop() iteration. Cheap - just reads the debounce timer
-    // and drains the ISR-filled rotation queue.
+    // Call every loop() iteration. Cheap - just reads the button debounce
+    // timer. Rotation is handled entirely by the ISR; nothing to poll there.
     void update();
 
-    // Positive = clockwise step(s), negative = counter-clockwise,
-    // 0 = no movement since last call. Consumes/resets after reading.
+    // Net detent clicks since the last call: positive = clockwise,
+    // negative = counter-clockwise, 0 = no movement. Consumes/resets after
+    // reading. Each full physical detent is exactly +1 or -1 - no
+    // division, no remainders.
     int takeRotation();
 
     // Edge-triggered, consume-once flags - each returns true exactly once
@@ -36,7 +45,7 @@ class EncoderModule {
     bool isButtonDown() const;
 
   private:
-    static const unsigned long DEBOUNCE_MS = 15;
+    static const unsigned long DEBOUNCE_MS = 8;
     static const unsigned long LONG_PRESS_MS = 600;
 
     // Button state
@@ -48,16 +57,15 @@ class EncoderModule {
     bool clickPending = false;
     bool longPressPending = false;
 
-    // Rotation - ISR writes into this, update()/takeRotation() drain it.
-    // Declared here so the .cpp's ISR (a free function/static) can reach it
-    // via a single module-level instance pointer.
+    // Rotation - the ISR advances encoderState through the state graph and
+    // increments/decrements this directly (by whole clicks, never
+    // fractional) whenever a full valid rotation completes. update()/
+    // takeRotation() just drain it - no per-call math needed.
     volatile int rotationAccumulator = 0;
+    uint8_t encoderState = 0; // starts at R_START, see EncoderModule.cpp
 
     static void IRAM_ATTR onEncoderChangeISR();
-    void handleEncoderChange(); // actual state-table logic, called from ISR
-
-    static const int8_t QUADRATURE_TABLE[16];
-    uint8_t quadratureState = 0;
+    void handleEncoderChange(); // actual state-graph logic, called from ISR
 
     static EncoderModule* instance; // for the static ISR to reach handleEncoderChange()
 };

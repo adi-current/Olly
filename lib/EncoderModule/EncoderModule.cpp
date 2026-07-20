@@ -3,15 +3,43 @@
 
 EncoderModule* EncoderModule::instance = nullptr;
 
-// Standard quadrature state table: index = (prevState<<2 | currState),
-// where each state is 2 bits (CLK<<1 | DT). Valid single-step transitions
-// give +1 or -1; invalid/bounce transitions (impossible jumps) give 0, so
-// contact bounce mostly just produces zeros instead of phantom steps.
-const int8_t EncoderModule::QUADRATURE_TABLE[16] = {
-   0, -1,  1,  0,
-   1,  0,  0, -1,
-  -1,  0,  0,  1,
-   0,  1, -1,  0
+// Full-step quadrature state graph (the classic Buxton-style rotary
+// encoder algorithm). Each row is the current state; each column is the
+// current pin reading (CLK<<1 | DT), 0-3. A cell's low nibble is the next
+// state; the DIR_CW/DIR_CCW bits are only set on the single transition
+// that completes one full, valid detent-to-detent rotation.
+//
+// Any bounce/noise transition that doesn't match a real rotation sequence
+// just routes back to R_START (or stays put) instead of being counted -
+// that's what makes this robust against the KY-040's contact bounce,
+// unlike counting raw pulses.
+#define R_START     0x0
+#define R_CW_FINAL  0x1
+#define R_CW_BEGIN  0x2
+#define R_CW_NEXT   0x3
+#define R_CCW_BEGIN 0x4
+#define R_CCW_FINAL 0x5
+#define R_CCW_NEXT  0x6
+
+#define DIR_CW   0x10
+#define DIR_CCW  0x20
+#define DIR_MASK 0x30
+
+static const uint8_t STATE_TABLE[7][4] = {
+  // R_START
+  { R_START,    R_CW_BEGIN,  R_CCW_BEGIN, R_START },
+  // R_CW_FINAL
+  { R_CW_NEXT,  R_START,     R_CW_FINAL,  R_START | DIR_CW },
+  // R_CW_BEGIN
+  { R_CW_NEXT,  R_CW_BEGIN,  R_START,     R_START },
+  // R_CW_NEXT
+  { R_CW_NEXT,  R_CW_BEGIN,  R_CW_FINAL,  R_START },
+  // R_CCW_BEGIN
+  { R_CCW_NEXT, R_START,     R_CCW_BEGIN, R_START },
+  // R_CCW_FINAL
+  { R_CCW_NEXT, R_CCW_FINAL, R_START,     R_START | DIR_CCW },
+  // R_CCW_NEXT
+  { R_CCW_NEXT, R_CCW_FINAL, R_CCW_BEGIN, R_START },
 };
 
 void EncoderModule::begin() {
@@ -20,10 +48,7 @@ void EncoderModule::begin() {
   pinMode(ENCODER_SW_PIN, INPUT_PULLUP); // KY-040 SW is active-low
 
   instance = this;
-
-  uint8_t clk = digitalRead(ENCODER_CLK_PIN);
-  uint8_t dt  = digitalRead(ENCODER_DT_PIN);
-  quadratureState = (clk << 1) | dt;
+  encoderState = R_START;
 
   attachInterrupt(digitalPinToInterrupt(ENCODER_CLK_PIN), onEncoderChangeISR, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENCODER_DT_PIN), onEncoderChangeISR, CHANGE);
@@ -40,27 +65,23 @@ void IRAM_ATTR EncoderModule::onEncoderChangeISR() {
 void EncoderModule::handleEncoderChange() {
   uint8_t clk = digitalRead(ENCODER_CLK_PIN);
   uint8_t dt  = digitalRead(ENCODER_DT_PIN);
-  uint8_t newState = (clk << 1) | dt;
+  uint8_t pinState = (dt << 1) | clk; // must match STATE_TABLE's bit convention
 
-  uint8_t index = (quadratureState << 2) | newState;
-  rotationAccumulator += QUADRATURE_TABLE[index & 0x0F];
+  encoderState = STATE_TABLE[encoderState & 0x0F][pinState];
+  uint8_t dir = encoderState & DIR_MASK;
 
-  quadratureState = newState;
+  if (dir == DIR_CW) {
+    rotationAccumulator++;
+  } else if (dir == DIR_CCW) {
+    rotationAccumulator--;
+  }
 }
 
 int EncoderModule::takeRotation() {
-  // 4 raw quadrature steps = 1 physical detent click on a standard KY-040.
-  // Divide down so takeRotation() returns "detent clicks," which is the
-  // unit every menu/UI actually wants to think in.
   noInterrupts();
-  int raw = rotationAccumulator;
+  int clicks = rotationAccumulator;
   rotationAccumulator = 0;
   interrupts();
-
-  static int leftoverRaw = 0; // carries fractional steps between calls
-  leftoverRaw += raw;
-  int clicks = leftoverRaw / 4;
-  leftoverRaw -= clicks * 4;
   return clicks;
 }
 

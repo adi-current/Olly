@@ -14,4 +14,10 @@
 #define ENCODER_DT_PIN  1
 #define ENCODER_SW_PIN  0
 
+// Touch sensor (external TTP223-style breakout - the ESP32-C3 has no
+// built-in capacitive touch peripheral, unlike the original ESP32/S2/S3).
+// Only one physical sensor exists, so it carries both roles via press
+// duration - see TouchModule.
+#define TOUCH_SENSOR_PIN 4
+
 #endif
